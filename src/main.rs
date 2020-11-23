@@ -1,5 +1,6 @@
+use dotenv;
 use serenity::{async_trait, model::{channel::*, gateway::Ready}, prelude::*};
-use std::convert::TryFrom;
+// use std::convert::TryFrom;
 
 struct Handler;
 
@@ -25,7 +26,11 @@ impl EventHandler for Handler {
 
 #[tokio::main]
 async fn main() {
-    let mut client = Client::builder(&"NzgwMTgzNzkwNDI0ODE3Njc1.X7rYxg.mFCv0y5Roih31VcyMZnFflgicj0")
+    dotenv::dotenv().expect("Could not read .env file");
+    let token = dotenv::var("DISCORD_TOKEN")
+        .expect("Could not read environment variable");
+        
+    let mut client = Client::builder(&token)
         .event_handler(Handler)
         .await
         .expect("Err creating client");

@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 serenity = { version = "0.9.1", default-features = false, features = ["client", "gateway", "rustls_backend", "model", "collector"] }
 tokio = { version = "0.2", features = ["macros"] }
+dotenv = "0.15.0"
