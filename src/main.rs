@@ -1,10 +1,10 @@
 use dotenv;
 use std::{collections::{HashMap, HashSet}, env, fmt::Write, sync::Arc};
-use serenity::{async_trait, client::bridge::gateway::{ShardId, ShardManager}, collector::MessageCollectorBuilder, collector::ReactionCollector, futures::StreamExt, framework::standard::{
+use serenity::{model::id::ChannelId, async_trait, client::bridge::gateway::{ShardId, ShardManager}, collector::MessageCollectorBuilder, collector::ReactionCollector, framework::standard::{
         Args, CheckResult, CommandOptions, CommandResult, CommandGroup,
         DispatchError, HelpOptions, help_commands, StandardFramework,
         macros::{command, group, help, check, hook},
-    }, http::Http, model::channel::Reaction, model::{channel::{Channel, Message, MessageReference, ReactionType},
+    }, futures::StreamExt, http::Http, model::channel::GuildChannel, model::channel::Reaction, model::{channel::{Channel, Message, MessageReference, ReactionType},
     gateway::Ready, id::UserId, permissions::Permissions}, utils::{content_safe, ContentSafeOptions}};
 use serenity::prelude::*;
 use tokio::sync::Mutex;
@@ -27,8 +27,11 @@ impl TypeMapKey for CommandCounter {
 
 struct Handler;
 
+static mut starboard: ChannelId = ChannelId(0);
+
 #[async_trait]
 impl EventHandler for Handler {
+
     async fn message(&self, ctx: Context, msg: Message) {
         // if let Some(reaction) = msg.await_reaction(&ctx).message_id(msg.id).await {
         //     let emoji = reaction.as_ref();
@@ -37,14 +40,23 @@ impl EventHandler for Handler {
         //     }
         // }
         let collector = msg.await_reactions(&ctx)
-            .collect_limit(10)
+            .collect_limit(2)
             .filter(|x| x.as_ref().emoji == ReactionType::try_from("<:pogsire:727216449432846476>").unwrap())
             .await;
         let collected: Vec<_> = collector.then(|reaction| async move {
             reaction
         }).collect().await;
-        if collected.len() >= 10 {
-            let _ = msg.reply(&ctx.http, "Poggers").await;
+        if collected.len() >= 2 {
+            unsafe {
+                let chan = ctx.cache.guild_channel(starboard).await.unwrap();
+                // build the message
+                let mut starred = format!("----------------------\n{}:\n> {}", &msg.author.name, &msg.content);
+                for embed in &msg.embeds {
+                    starred.push_str(format!("\n{}", embed.url.as_deref().unwrap()).as_str());
+                }
+                starred.push_str(format!("\n{}\n----------------------", &msg.link()).as_str());
+                let _ = chan.say(ctx.http, &starred).await;
+            }
         }
     }
 
@@ -54,7 +66,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(about)]
+#[commands(about, channel)]
 struct General;
 
 // The framework provides two built-in help commands for you to use.
@@ -128,12 +140,6 @@ async fn after(_ctx: &Context, _msg: &Message, command_name: &str, command_resul
 async fn unknown_command(_ctx: &Context, _msg: &Message, unknown_command_name: &str) {
     println!("Could not find command named '{}'", unknown_command_name);
 }
-
-#[hook]
-async fn normal_message(_ctx: &Context, msg: &Message) {
-    println!("Message is not a command '{}'", msg.content);
-}
-
 
 #[hook]
 async fn dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
@@ -217,8 +223,6 @@ async fn main() {
     // Set a function that's called whenever an attempted command-call's
     // command could not be found.
         .unrecognised_command(unknown_command)
-    // Set a function that's called whenever a message is not a command.
-        .normal_message(normal_message)
     // Set a function that's called whenever a command's execution didn't complete for one
     // reason or another. For example, when a user has exceeded a rate-limit or a command
     // can only be performed by the bot owner.
@@ -246,6 +250,19 @@ async fn main() {
 #[command]
 async fn about(ctx: &Context, msg: &Message) -> CommandResult {
     msg.channel_id.say(&ctx.http, "This is a small test-bot! : )").await?;
+
+    Ok(())
+}
+
+#[command]
+#[required_permissions("ADMINISTRATOR")]
+async fn channel(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let new_channel = args.single::<u64>()?;
+
+    unsafe {
+        starboard = ChannelId(new_channel);
+        msg.channel_id.say(&ctx.http, &format!("Set the channel to {:?}", ctx.cache.guild_channel(starboard).await.unwrap().name)).await?;
+    }
 
     Ok(())
 }
