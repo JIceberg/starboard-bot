@@ -1,10 +1,10 @@
 use dotenv;
 use std::{collections::{HashMap, HashSet}, env, fmt::Write, sync::Arc};
-use serenity::{model::id::ChannelId, async_trait, client::bridge::gateway::{ShardId, ShardManager}, collector::MessageCollectorBuilder, collector::ReactionCollector, framework::standard::{
+use serenity::{utils::Colour, async_trait, client::bridge::gateway::{ShardId, ShardManager}, collector::MessageCollectorBuilder, collector::ReactionCollector, framework::standard::{
         Args, CheckResult, CommandOptions, CommandResult, CommandGroup,
         DispatchError, HelpOptions, help_commands, StandardFramework,
         macros::{command, group, help, check, hook},
-    }, futures::StreamExt, http::Http, model::channel::GuildChannel, model::channel::Reaction, model::{channel::{Channel, Message, MessageReference, ReactionType},
+    }, futures::StreamExt, http::Http, model::channel::Embed, model::channel::GuildChannel, model::channel::Reaction, model::id::ChannelId, model::{channel::{Channel, Message, MessageReference, ReactionType},
     gateway::Ready, id::UserId, permissions::Permissions}, utils::{content_safe, ContentSafeOptions}};
 use serenity::prelude::*;
 use tokio::sync::Mutex;
@@ -50,12 +50,34 @@ impl EventHandler for Handler {
             unsafe {
                 let chan = ctx.cache.guild_channel(starboard).await.unwrap();
                 // build the message
-                let mut starred = format!("----------------------\n{}:\n> {}", &msg.author.name, &msg.content);
-                for embed in &msg.embeds {
-                    starred.push_str(format!("\n{}", embed.url.as_deref().unwrap()).as_str());
-                }
-                starred.push_str(format!("\n{}\n----------------------", &msg.link()).as_str());
-                let _ = chan.say(ctx.http, &starred).await;
+                // let mut starred = format!("----------------------\n{}:\n> {}", &msg.author.name, &msg.content);
+                // for embed in &msg.embeds {
+                //     starred.push_str(format!("\n{}", embed.url.as_deref().unwrap()).as_str());
+                // }
+                // starred.push_str(format!("\n{}\n----------------------", &msg.link()).as_str());
+                // let _ = chan.say(ctx.http, &starred).await;
+                let _ = chan.send_message(&ctx.http, |m| {
+                    m.embed(|e| {
+                        e.title("Jump to the message.").url(&msg.link())
+                        .author(|a| {
+                            a.icon_url(&msg.author.face()).name(&msg.author.name)
+                        })
+                        .color(Colour::GOLD)
+                        .timestamp(&msg.timestamp)
+                        .description(&msg.content);
+
+                        if msg.embeds.len() > 0 {
+                            e.image(&msg.embeds.get(0).unwrap().url.as_ref().unwrap());
+                        } else if msg.attachments.len() > 0 {
+                            e.image(&msg.attachments.get(0).unwrap().url);
+                        }
+
+                        e
+                    });
+    
+                    m
+                })
+                .await;
             }
         }
     }
@@ -66,7 +88,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(about, channel)]
+#[commands(about, channel, emote, threshold)]
 struct General;
 
 // The framework provides two built-in help commands for you to use.
@@ -263,6 +285,21 @@ async fn channel(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult 
         starboard = ChannelId(new_channel);
         msg.channel_id.say(&ctx.http, &format!("Set the channel to {:?}", ctx.cache.guild_channel(starboard).await.unwrap().name)).await?;
     }
+
+    Ok(())
+}
+
+#[command]
+#[required_permissions("ADMINISTRATOR")]
+async fn emote(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+
+    Ok(())
+}
+
+#[command]
+#[required_permissions("ADMINISTRATOR")]
+async fn threshold(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let react = args.single::<String>()?;
 
     Ok(())
 }
