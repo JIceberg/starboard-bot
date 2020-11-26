@@ -1,10 +1,11 @@
+use std::{future::Future, sync::RwLockReadGuard};
 use dotenv;
 use std::{collections::{HashMap, HashSet}, env, fmt::Write, sync::Arc};
 use serenity::{utils::Colour, async_trait, client::bridge::gateway::{ShardId, ShardManager}, collector::MessageCollectorBuilder, collector::ReactionCollector, framework::standard::{
         Args, CheckResult, CommandOptions, CommandResult, CommandGroup,
         DispatchError, HelpOptions, help_commands, StandardFramework,
         macros::{command, group, help, check, hook},
-    }, futures::StreamExt, http::Http, model::channel::Embed, model::channel::GuildChannel, model::channel::Reaction, model::id::ChannelId, model::{channel::{Channel, Message, MessageReference, ReactionType},
+    }, futures::StreamExt, http::Http, model::channel::Embed, model::channel::GuildChannel, model::channel::Reaction, model::id::*, model::{channel::{Channel, Message, MessageReference, ReactionType},
     gateway::Ready, id::UserId, permissions::Permissions}, utils::{content_safe, ContentSafeOptions}};
 use serenity::prelude::*;
 use tokio::sync::Mutex;
@@ -27,11 +28,25 @@ impl TypeMapKey for CommandCounter {
 
 struct Handler;
 
-static mut starboard: ChannelId = ChannelId(0);
+struct ChannelMap;
+struct EmoteMap;
+struct ThresholdMap;
 
+impl TypeMapKey for ChannelMap {
+    type Value = Arc<RwLock<HashMap<GuildId, ChannelId>>>;
+}
+
+impl TypeMapKey for EmoteMap {
+    type Value = Arc<RwLock<HashMap<GuildId, ReactionType>>>;
+}
+
+impl TypeMapKey for ThresholdMap {
+    type Value = Arc<RwLock<HashMap<GuildId, u32>>>;
+}
+
+use futures::executor;
 #[async_trait]
 impl EventHandler for Handler {
-
     async fn message(&self, ctx: Context, msg: Message) {
         // if let Some(reaction) = msg.await_reaction(&ctx).message_id(msg.id).await {
         //     let emoji = reaction.as_ref();
@@ -39,46 +54,71 @@ impl EventHandler for Handler {
         //         let _ = msg.reply(&ctx.http, "Poggers").await;
         //     }
         // }
+        let c_ctx = ctx.clone();
+        let c_msg = msg.clone();
+        // let read_data = &ctx.data.read().await;
+        // let mapping = read_data.get::<ThresholdMap>().unwrap();
+        // let thresh_map = mapping.read().await;
+        // let limit = match thresh_map.get::<GuildId>(&msg.guild_id.unwrap()) {
+        //     Some(a) => a,
+        //     _ => &5,
+        // };
         let collector = msg.await_reactions(&ctx)
-            .collect_limit(2)
-            .filter(|x| x.as_ref().emoji == ReactionType::try_from("<:pogsire:727216449432846476>").unwrap())
+            .collect_limit(5)
+            .filter(move |x| {
+                let res = async {
+                    let data_read = c_ctx.data.read().await;
+                    let map = data_read.get::<EmoteMap>().unwrap();
+                    let read_map = map.read().await;
+                    println!("{}", x.as_ref().emoji.as_data());
+                    println!("{}", read_map.get::<GuildId>(&msg.guild_id.unwrap()).unwrap().as_data());
+                    x.as_ref().emoji.as_data() == read_map.get::<GuildId>(&msg.guild_id.unwrap()).unwrap().as_data()
+                };
+                let x = executor::block_on(res);
+                println!("{}", x);
+                x
+            })
             .await;
         let collected: Vec<_> = collector.then(|reaction| async move {
             reaction
         }).collect().await;
-        if collected.len() >= 2 {
-            unsafe {
-                let chan = ctx.cache.guild_channel(starboard).await.unwrap();
-                // build the message
-                // let mut starred = format!("----------------------\n{}:\n> {}", &msg.author.name, &msg.content);
-                // for embed in &msg.embeds {
-                //     starred.push_str(format!("\n{}", embed.url.as_deref().unwrap()).as_str());
-                // }
-                // starred.push_str(format!("\n{}\n----------------------", &msg.link()).as_str());
-                // let _ = chan.say(ctx.http, &starred).await;
-                let _ = chan.send_message(&ctx.http, |m| {
-                    m.embed(|e| {
-                        e.title("Jump to the message.").url(&msg.link())
-                        .author(|a| {
-                            a.icon_url(&msg.author.face()).name(&msg.author.name)
-                        })
-                        .color(Colour::GOLD)
-                        .timestamp(&msg.timestamp)
-                        .description(&msg.content);
+        if collected.len() >= 5 as usize {
+            let data_read = ctx.data.read().await;
+            let map_lock = &data_read.get::<ChannelMap>()
+                .expect("Expected channel map")
+                .clone();
+            let map = map_lock.read().await;
+            let starboard = map.get(&c_msg.guild_id.unwrap()).unwrap();
+            let chan = ctx.cache.guild_channel(starboard).await.unwrap();
+            // build the message
+            // let mut starred = format!("----------------------\n{}:\n> {}", &msg.author.name, &msg.content);
+            // for embed in &msg.embeds {
+            //     starred.push_str(format!("\n{}", embed.url.as_deref().unwrap()).as_str());
+            // }
+            // starred.push_str(format!("\n{}\n----------------------", &msg.link()).as_str());
+            // let _ = chan.say(ctx.http, &starred).await;
+            let _ = chan.send_message(&ctx.http, |m| {
+                m.embed(|e| {
+                    e.title("Jump to the message.").url(&c_msg.link())
+                    .author(|a| {
+                        a.icon_url(&c_msg.author.face()).name(&c_msg.author.name)
+                    })
+                    .color(Colour::GOLD)
+                    .timestamp(&c_msg.timestamp)
+                    .description(&c_msg.content);
 
-                        if msg.embeds.len() > 0 {
-                            e.image(&msg.embeds.get(0).unwrap().url.as_ref().unwrap());
-                        } else if msg.attachments.len() > 0 {
-                            e.image(&msg.attachments.get(0).unwrap().url);
-                        }
+                    if c_msg.embeds.len() > 0 {
+                        e.image(&c_msg.embeds.get(0).unwrap().url.as_ref().unwrap());
+                    } else if c_msg.attachments.len() > 0 {
+                        e.image(&c_msg.attachments.get(0).unwrap().url);
+                    }
 
-                        e
-                    });
-    
-                    m
-                })
-                .await;
-            }
+                    e
+                });
+
+                m
+            })
+            .await;
         }
     }
 
@@ -262,6 +302,9 @@ async fn main() {
         let mut data = client.data.write().await;
         data.insert::<CommandCounter>(HashMap::default());
         data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
+        data.insert::<ChannelMap>(Arc::new(RwLock::new(HashMap::default())));
+        data.insert::<EmoteMap>(Arc::new(RwLock::new(HashMap::default())));
+        data.insert::<ThresholdMap>(Arc::new(RwLock::new(HashMap::default())));
     }
 
     if let Err(why) = client.start().await {
@@ -271,7 +314,7 @@ async fn main() {
 
 #[command]
 async fn about(ctx: &Context, msg: &Message) -> CommandResult {
-    msg.channel_id.say(&ctx.http, "This is a small test-bot! : )").await?;
+    msg.channel_id.say(&ctx.http, "A bot to save memorable posts").await?;
 
     Ok(())
 }
@@ -281,9 +324,17 @@ async fn about(ctx: &Context, msg: &Message) -> CommandResult {
 async fn channel(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let new_channel = args.single::<u64>()?;
 
-    unsafe {
-        starboard = ChannelId(new_channel);
-        msg.channel_id.say(&ctx.http, &format!("Set the channel to {:?}", ctx.cache.guild_channel(starboard).await.unwrap().name)).await?;
+    let map_lock = {
+        let data_read = ctx.data.read().await;
+
+        data_read.get::<ChannelMap>().expect("Expected Channel Map in TypeMap").clone()
+    };
+    {
+        let mut map = map_lock.write().await;
+        let starboard = map.entry(msg.guild_id.unwrap()).or_insert(ChannelId(0));
+        *starboard = ChannelId(new_channel);
+        msg.channel_id.say(&ctx.http, &format!("Set the channel to {:?}", ctx.cache.guild_channel(*starboard)
+            .await.unwrap().name)).await?;
     }
 
     Ok(())
@@ -292,6 +343,20 @@ async fn channel(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult 
 #[command]
 #[required_permissions("ADMINISTRATOR")]
 async fn emote(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let react = args.single::<String>()?;
+
+    let map = {
+        let data_read = ctx.data.read().await;
+
+        data_read.get::<EmoteMap>().expect("Expected Emote Map in TypeMap").clone()
+    };
+    {
+        let mut write_map = map.write().await;
+        let pogsire = write_map.entry(msg.guild_id.unwrap())
+            .or_insert(ReactionType::try_from("<:pogsire:727216449432846476>").unwrap());
+        *pogsire = ReactionType::try_from(react.as_str()).unwrap();
+        msg.channel_id.say(&ctx.http, &format!("Set the emote to {}", pogsire.as_data().as_str())).await?;
+    }
 
     Ok(())
 }
@@ -299,7 +364,20 @@ async fn emote(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 #[command]
 #[required_permissions("ADMINISTRATOR")]
 async fn threshold(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let react = args.single::<String>()?;
+    let num = args.single::<u32>()?;
+
+    let map = {
+        let data_read = ctx.data.read().await;
+
+        data_read.get::<ThresholdMap>().expect("Expected Threshold Map in TypeMap").clone()
+    };
+    {
+        let mut write_map = map.write().await;
+        let thres = write_map.entry(msg.guild_id.unwrap())
+            .or_insert(5);
+        *thres = num;
+        msg.channel_id.say(&ctx.http, &format!("Set the threshold to {} reactions", num)).await?;
+    }
 
     Ok(())
 }
