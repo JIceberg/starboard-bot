@@ -1,12 +1,12 @@
-use std::{future::Future, sync::RwLockReadGuard};
 use dotenv;
-use std::{collections::{HashMap, HashSet}, env, fmt::Write, sync::Arc};
-use serenity::{utils::Colour, async_trait, client::bridge::gateway::{ShardId, ShardManager}, collector::MessageCollectorBuilder, collector::ReactionCollector, framework::standard::{
-        Args, CheckResult, CommandOptions, CommandResult, CommandGroup,
+use std::{collections::{HashMap, HashSet}, sync::Arc};
+use serenity::{utils::Colour, async_trait, client::bridge::gateway::ShardManager,
+    framework::standard::{
+        Args, CommandResult, CommandGroup,
         DispatchError, HelpOptions, help_commands, StandardFramework,
-        macros::{command, group, help, check, hook},
-    }, futures::StreamExt, http::Http, model::channel::Embed, model::channel::GuildChannel, model::channel::Reaction, model::id::*, model::{channel::{Channel, Message, MessageReference, ReactionType},
-    gateway::Ready, id::UserId, permissions::Permissions}, utils::{content_safe, ContentSafeOptions}};
+        macros::{command, group, help, hook},
+    }, futures::StreamExt, http::Http, model::id::*, model::{channel::{Message, ReactionType},
+    gateway::Ready, id::UserId}};
 use serenity::prelude::*;
 use tokio::sync::Mutex;
 use std::convert::TryFrom;
@@ -48,47 +48,50 @@ use futures::executor;
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
-        // if let Some(reaction) = msg.await_reaction(&ctx).message_id(msg.id).await {
-        //     let emoji = reaction.as_ref();
-        //     if emoji.as_inner_ref().emoji == ReactionType::try_from("<:pogsire:727216449432846476>").unwrap() {
-        //         let _ = msg.reply(&ctx.http, "Poggers").await;
-        //     }
-        // }
         let c_ctx = ctx.clone();
         let c_msg = msg.clone();
-        // let read_data = &ctx.data.read().await;
-        // let mapping = read_data.get::<ThresholdMap>().unwrap();
-        // let thresh_map = mapping.read().await;
-        // let limit = match thresh_map.get::<GuildId>(&msg.guild_id.unwrap()) {
-        //     Some(a) => a,
-        //     _ => &5,
-        // };
+        let mut thresh: u32 = 5;
         let collector = msg.await_reactions(&ctx)
-            .collect_limit(5)
+            .collect_limit({
+                let data_read = c_ctx.data.read().await;
+                let map = data_read.get::<ThresholdMap>().unwrap();
+                let read_map = map.read().await;
+
+                thresh = match read_map.get::<GuildId>(&msg.guild_id.unwrap()) {
+                    Some(a) => *a,
+                    _ => 5,
+                };
+                thresh
+            })
             .filter(move |x| {
                 let res = async {
                     let data_read = c_ctx.data.read().await;
                     let map = data_read.get::<EmoteMap>().unwrap();
                     let read_map = map.read().await;
-                    println!("{}", x.as_ref().emoji.as_data());
-                    println!("{}", read_map.get::<GuildId>(&msg.guild_id.unwrap()).unwrap().as_data());
-                    x.as_ref().emoji.as_data() == read_map.get::<GuildId>(&msg.guild_id.unwrap()).unwrap().as_data()
+
+                    let my_emote = read_map.get::<GuildId>(&msg.guild_id.unwrap())
+                        .get_or_insert(&ReactionType::try_from("⭐").unwrap())
+                        .clone();
+
+                    x.as_ref().emoji.as_data() == my_emote.as_data()
                 };
-                let y = executor::block_on(res);
-                println!("{}", y);
-                y
+
+                executor::block_on(res)
             })
             .await;
         let collected: Vec<_> = collector.then(|reaction| async move {
             reaction
         }).collect().await;
-        if collected.len() >= 5 as usize {
-            let data_read = ctx.data.read().await;
-            let map_lock = &data_read.get::<ChannelMap>()
+        if collected.len() >= (thresh as usize) {
+            let read_data = &ctx.data.read().await;
+            let map_lock = read_data.get::<ChannelMap>()
                 .expect("Expected channel map")
                 .clone();
             let map = map_lock.read().await;
-            let starboard = map.get(&c_msg.guild_id.unwrap()).unwrap();
+            let starboard = match map.get(&c_msg.guild_id.unwrap()) {
+                Some(a) => a,
+                _ => &ChannelId(0),
+            };
             let chan = ctx.cache.guild_channel(starboard).await.unwrap();
             // build the message
             // let mut starred = format!("----------------------\n{}:\n> {}", &msg.author.name, &msg.content);
@@ -194,7 +197,12 @@ async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
 async fn after(_ctx: &Context, _msg: &Message, command_name: &str, command_result: CommandResult) {
     match command_result {
         Ok(()) => println!("Processed command '{}'", command_name),
-        Err(why) => println!("Command '{}' returned error {:?}", command_name, why),
+        Err(why) => {
+            let res = format!("Command '{}' returned error {:?}", command_name, why);
+            let _ = _msg.reply(&_ctx.http, format!("{}", res));
+
+            println!("{}", res)
+        },
     }
 }
 
@@ -213,8 +221,6 @@ async fn dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
     }
 }
 
-// You can construct a hook without the use of a macro, too.
-// This requires some boilerplate though and the following additional import.
 use serenity::{futures::future::BoxFuture, FutureExt};
 fn _dispatch_error_no_macro<'fut>(ctx: &'fut mut Context, msg: &'fut Message, error: DispatchError) -> BoxFuture<'fut, ()> {
     async move {
@@ -270,14 +276,6 @@ async fn main() {
     // Set a function to be called prior to each command execution. This
     // provides the context of the command, the message that was received,
     // and the full name of the command that will be called.
-    //
-    // You can not use this to determine whether a command should be
-    // executed. Instead, the `#[check]` macro gives you this functionality.
-    //
-    // **Note**: Async closures are unstable, you may use them in your
-    // application if you are fine using nightly Rust.
-    // If not, we need to provide the function identifiers to the
-    // hook-functions (before, after, normal, ...).
         .before(before)
     // Similar to `before`, except will be called directly _after_
     // command execution.
