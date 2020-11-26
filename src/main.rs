@@ -74,9 +74,9 @@ impl EventHandler for Handler {
                     println!("{}", read_map.get::<GuildId>(&msg.guild_id.unwrap()).unwrap().as_data());
                     x.as_ref().emoji.as_data() == read_map.get::<GuildId>(&msg.guild_id.unwrap()).unwrap().as_data()
                 };
-                let x = executor::block_on(res);
-                println!("{}", x);
-                x
+                let y = executor::block_on(res);
+                println!("{}", y);
+                y
             })
             .await;
         let collected: Vec<_> = collector.then(|reaction| async move {
