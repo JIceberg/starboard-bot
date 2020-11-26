@@ -100,28 +100,30 @@ impl EventHandler for Handler {
             // }
             // starred.push_str(format!("\n{}\n----------------------", &msg.link()).as_str());
             // let _ = chan.say(ctx.http, &starred).await;
-            let _ = chan.send_message(&ctx.http, |m| {
-                m.embed(|e| {
-                    e.title("Jump to the message.").url(&c_msg.link())
-                    .author(|a| {
-                        a.icon_url(&c_msg.author.face()).name(&c_msg.author.name)
-                    })
-                    .color(Colour::GOLD)
-                    .timestamp(&c_msg.timestamp)
-                    .description(&c_msg.content);
+            if c_msg.channel_id != *starboard {
+                let _ = chan.send_message(&ctx.http, |m| {
+                    m.embed(|e| {
+                        e.title("Jump to the message.").url(&c_msg.link())
+                        .author(|a| {
+                            a.icon_url(&c_msg.author.face()).name(&c_msg.author.name)
+                        })
+                        .color(Colour::GOLD)
+                        .timestamp(&c_msg.timestamp)
+                        .description(&c_msg.content);
 
-                    if c_msg.embeds.len() > 0 {
-                        e.image(&c_msg.embeds.get(0).unwrap().url.as_ref().unwrap());
-                    } else if c_msg.attachments.len() > 0 {
-                        e.image(&c_msg.attachments.get(0).unwrap().url);
-                    }
+                        if c_msg.embeds.len() > 0 {
+                            e.image(&c_msg.embeds.get(0).unwrap().url.as_ref().unwrap());
+                        } else if c_msg.attachments.len() > 0 {
+                            e.image(&c_msg.attachments.get(0).unwrap().url);
+                        }
 
-                    e
-                });
+                        e
+                    });
 
-                m
-            })
-            .await;
+                    m
+                })
+                .await;
+            }
         }
     }
 
